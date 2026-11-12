@@ -1,7 +1,6 @@
 import java.io.Serializable;
 
 public class Column implements Serializable {
-    private static final long serialVersionUID = 1L;
 
     public enum DataType {
         INT, DOUBLE, STRING, DATE, BOOLEAN
