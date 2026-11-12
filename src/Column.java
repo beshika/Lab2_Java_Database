@@ -1,0 +1,38 @@
+import java.io.Serializable;
+
+public class Column implements Serializable {
+    private static final long serialVersionUID = 1L;
+
+    public enum DataType {
+        INT, DOUBLE, STRING, DATE, BOOLEAN
+    }
+
+    private String name;
+    private DataType type;
+    private boolean isKey;      // Является ли первичным ключом
+    private boolean isRequired; // Обязательно ли для заполнения или можно поставить null
+
+    public Column(String name, DataType type, boolean isKey, boolean isRequired) {
+        this.name = name;
+        this.type = type;
+        this.isKey = isKey;
+        this.isRequired = isRequired;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public DataType getType() {
+        return type;
+    }
+
+    public boolean isKey() {
+        return isKey;
+    }
+
+    public boolean isRequired() {
+        return isRequired;
+    }
+}
+
