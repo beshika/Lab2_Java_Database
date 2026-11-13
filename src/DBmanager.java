@@ -1,6 +1,7 @@
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
 
@@ -11,112 +12,191 @@ public class DBmanager {
         this.tables = new HashMap<>();
         initializeTables();
     }
-    // Создание таблиц предметной области
+
     private void initializeTables() {
-        // Таблица складов (warehouses)
         Table warehouses = new Table("warehouses");
         warehouses.addColumn(new Column("id", Column.DataType.INT, true, true));
         warehouses.addColumn(new Column("address", Column.DataType.STRING, false, true));
         warehouses.addColumn(new Column("isFull", Column.DataType.BOOLEAN, false, false));
         tables.put("warehouses", warehouses);
 
-        // Таблица товаров (products)
         Table products = new Table("products");
         products.addColumn(new Column("id", Column.DataType.INT, true, true));
         products.addColumn(new Column("name", Column.DataType.STRING, false, true));
         products.addColumn(new Column("price", Column.DataType.DOUBLE, false, true));
         products.addColumn(new Column("manufactureDate", Column.DataType.DATE, false, false));
         products.addColumn(new Column("quantity", Column.DataType.INT, false, true));
-        products.addColumn(new Column("warehouseId", Column.DataType.INT, false, false));
+        products.addColumn(new Column("warehouseId", Column.DataType.INT, false, true));
         tables.put("products", products);
     }
 
-    public void insert(String tableName, DBrecord givenDBrecord) {
-        // Проверка, что таблица существует
-        Table table = getExistingTable(tableName);
-
-        // Проверка, что переданные столбцы существуют в таблице
-        for (String fieldName : givenDBrecord.getFields().keySet()) {
-            if (table.getColumn(fieldName) == null) {
-                throw new IllegalArgumentException(
-                        "Столбец '" + fieldName + "' не существует в таблице '" + tableName + "'"
-                );
-            }
+     // Вставка одной записи в таблицу.
+    public void insert(String tableName, List<DBrecord> records) {
+        Table table = getTable(tableName);
+        if (records == null || records.isEmpty()) {
+            throw new IllegalArgumentException("Список записей для вставки пуст");
         }
+        List<DBrecord> validatedRecords = new ArrayList<>();
 
-        // Создаем формализованную запись (чтобы заполнить пропущенные необязательные поля как null)
-        DBrecord formalizedDBrecord = new DBrecord();
-
-        for (Column col : table.getColumns()) {
-            String colName = col.getName();
-            Object value = getValueIgnoreCase(givenDBrecord, colName);
-
-            // Проверка, что обязательные поля все присутствуют
-            if (value == null) {
-                if (col.isRequired()) {
+        // Проверка существования переданных столбцов
+        for (DBrecord record : records) {
+            for (String fieldName : record.getFields().keySet()) {
+                if (table.getColumn(fieldName) == null) {
                     throw new IllegalArgumentException(
-                            "Обязательное поле '" + colName + "' не может быть пустым (null)"
+                            "Столбец '" + fieldName + "' не существует в таблице '" + tableName + "'"
                     );
                 }
-                formalizedDBrecord.set(colName, null);
-                continue;
             }
 
-            // Проверка соответствия типов данных
-            if (!isValidType(value, col.getType())) {
-                throw new IllegalArgumentException(
-                        "Неверный тип данных для столбца '" + colName + "'. Ожидался: " + col.getType()
-                );
+            DBrecord formalizedDBrecord = new DBrecord();
+            // Проверка правильности типов, наличия обязательных полей для каждого столбца и уникальности первичного ключа
+            for (Column col : table.getColumns()) {
+                String colName = col.getName();
+                Object value = getValueIgnoreCase(record, colName);
+                if (value == null) {
+                    if (col.isRequired()) {
+                        throw new IllegalArgumentException(
+                                "Обязательное поле '" + colName + "' не может быть пустым"
+                        );
+                    }
+                    formalizedDBrecord.set(colName, null);
+                    continue;
+                }
+                if (!isValidType(value, col.getType())) {
+                    throw new IllegalArgumentException(
+                            "Неверный тип данных для столбца '" + colName + "'. Ожидался: " + col.getType()
+                    );
+                }
+                if (col.isKey()) {
+                    checkPrimaryKeyIsUnique(table, colName, value);
+                    if (!validatedRecords.isEmpty()){
+                        for (DBrecord prev : validatedRecords) {
+                            Object prevKey = prev.get(colName);
+                            if (prevKey != null && prevKey.equals(value)) {
+                                throw new IllegalArgumentException("Нарушение уникальности первичного ключа! В запросе дублируется " + colName + " = " + value);
+                            }
+                        }
+                    }
+                }
+                formalizedDBrecord.set(colName, value);
             }
+            validatedRecords.add(formalizedDBrecord);
+        }
+        table.getRecords().addAll(validatedRecords);
+    }
 
-            // Проверка уникальности первичного ключа
-            if (col.isKey()) {
-                checkPrimaryKeyIsUnique(table, colName, value);
+     // Если columnNames == null, выбираются все столбцы (*).
+     // Если whereCol == null, выбираются все строки.
+    public List<DBrecord> select(String tableName, List<String> columnNames,
+                               String whereCol, String whereOp, Object whereVal) {
+        Table table = getTable(tableName);
+
+        // Проверка запрашиваемых столбцов (если не *)
+        List<Column> targetColumns = new ArrayList<>();
+        if (columnNames == null) {
+            targetColumns.addAll(table.getColumns());
+        } else {
+            for (String colName : columnNames) {
+                Column col = table.getColumn(colName);
+                if (col == null) {
+                    throw new IllegalArgumentException(
+                            "Столбец '" + colName + "' не найден в таблице '" + tableName + "'"
+                    );
+                }
+                targetColumns.add(col);
             }
-
-            formalizedDBrecord.set(colName, value);
         }
 
-        table.addRecord(formalizedDBrecord);
-    }
-
-    // Выбор как SELECT *
-    public List<DBrecord> selectAll(String tableName) {
-        Table table = getExistingTable(tableName);
-        return new ArrayList<>(table.getRecords());
-    }
-
-    // Выбор конкретных столбцов из таблицы для всех строк
-    public List<DBrecord> selectColumns(String tableName, String... columnNames) {
-        Table table = getExistingTable(tableName);
-
-        // Проверка, что все запрошенные столбцы существуют
-        for (String colName : columnNames) {
-            if (table.getColumn(colName) == null) {
-                throw new IllegalArgumentException(
-                        "Столбец '" + colName + "' не найден в таблице '" + tableName + "'"
-                );
-            }
+        // Проверка условия WHERE на адекватность, если оно есть
+        if (whereCol != null) {
+            validateCondition(table, whereCol, whereOp, whereVal);
         }
 
         List<DBrecord> result = new ArrayList<>();
         for (DBrecord original : table.getRecords()) {
-            DBrecord selectedDBrecord = new DBrecord();
-            for (String colName : columnNames) { // По каждому из введенных столбцов
-                Column actualCol = table.getColumn(colName); // Возвращает столбец по названию
-                selectedDBrecord.set(actualCol.getName(), original.get(actualCol.getName())); // Строим запись только из нужных столбцов
+            if (whereCol == null || matchesCondition(original, whereCol, whereOp, whereVal)) {
+                DBrecord selectedRecord = new DBrecord();
+                for (Column col : targetColumns) {
+                    selectedRecord.set(col.getName(), original.get(col.getName()));
+                }
+                result.add(selectedRecord);
             }
-            result.add(selectedDBrecord);
         }
         return result;
     }
 
-    // ___Вспомогательные методы___
+    public int update(String tableName, Map<String, Object> newValues, String whereCol, String whereOp, Object whereVal) {
+        Table table = getTable(tableName);
 
-    private Table getExistingTable(String tableName) {
-        if (tableName == null || tableName.isBlank()) {
-            throw new IllegalArgumentException("Имя таблицы не передано");
+        if (newValues == null || newValues.isEmpty()) {
+            throw new IllegalArgumentException("Не указаны поля для обновления");
         }
+
+        for (Map.Entry<String, Object> entry : newValues.entrySet()) {
+            String colName = entry.getKey();
+            Object newVal = entry.getValue();
+
+            Column col = table.getColumn(colName);
+            if (col == null) {
+                throw new IllegalArgumentException(
+                        "Столбец '" + colName + "' не существует в таблице '" + tableName + "'"
+                );
+            }
+
+            if (col.isKey()) {
+                throw new IllegalArgumentException("Нельзя изменять первичный ключ '" + colName + "'");
+            }
+
+            if (newVal == null) {
+                if (col.isRequired()) {
+                    throw new IllegalArgumentException(
+                            "Обязательное поле '" + colName + "' нельзя установить в null"
+                    );
+                }
+            } else if (!isValidType(newVal, col.getType())) {
+                throw new IllegalArgumentException(
+                        "Неверный тип данных для столбца '" + colName + "'. Ожидался: " + col.getType()
+                );
+            }
+        }
+        // Проверка условия WHERE при наличии
+        if (whereCol != null) {
+            validateCondition(table, whereCol, whereOp, whereVal);
+        }
+
+        int updatedCount = 0;
+        for (DBrecord DBrecord : table.getRecords()) {
+            if (whereCol == null || matchesCondition(DBrecord, whereCol, whereOp, whereVal)) {
+                for (Map.Entry<String, Object> entry : newValues.entrySet()) {
+                    Column actualCol = table.getColumn(entry.getKey());
+                    DBrecord.set(actualCol.getName(), entry.getValue());
+                }
+                updatedCount++;
+            }
+        }
+        return updatedCount;
+    }
+
+    public int delete(String tableName, String whereCol, String whereOp, Object whereVal) {
+        Table table = getTable(tableName);
+
+        if (whereCol != null) {
+            validateCondition(table, whereCol, whereOp, whereVal);
+        }
+
+        int deletedCount = 0;
+        Iterator<DBrecord> it = table.getRecords().iterator();
+        while (it.hasNext()) {
+            DBrecord DBrecord = it.next();
+            if (whereCol == null || matchesCondition(DBrecord, whereCol, whereOp, whereVal)) {
+                it.remove();
+                deletedCount++;
+            }
+        }
+        return deletedCount;
+    }
+
+    public Table getTable(String tableName) {
         Table table = tables.get(tableName.toLowerCase());
         if (table == null) {
             throw new IllegalArgumentException("Таблица '" + tableName + "' не найдена");
@@ -124,7 +204,8 @@ public class DBmanager {
         return table;
     }
 
-     // Достает значение из DBrecord без учета регистра имени поля
+    // ___Вспомогательные методы___
+
     private Object getValueIgnoreCase(DBrecord DBrecord, String targetField) {
         for (Map.Entry<String, Object> entry : DBrecord.getFields().entrySet()) {
             if (entry.getKey().equalsIgnoreCase(targetField)) {
@@ -134,25 +215,6 @@ public class DBmanager {
         return null;
     }
 
-    // Проверка на то, что в столбец вставляются данные ожидаемого для него типа
-    private boolean isValidType(Object value, Column.DataType expectedType) {
-        switch (expectedType) {
-            case INT:
-                return value instanceof Integer;
-            case DOUBLE:
-                return value instanceof Double;
-            case STRING:
-                return value instanceof String;
-            case DATE:
-                return value instanceof LocalDate;
-            case BOOLEAN:
-                return value instanceof Boolean;
-            default:
-                return false;
-        }
-    }
-
-    // Проверка на уникальность первичного ключа
     private void checkPrimaryKeyIsUnique(Table table, String keyColName, Object newKeyValue) {
         for (DBrecord existing : table.getRecords()) {
             Object existingKey = existing.get(keyColName);
@@ -164,6 +226,72 @@ public class DBmanager {
         }
     }
 
+    private boolean isValidType(Object value, Column.DataType expectedType) {
+        switch (expectedType) {
+            case INT: return value instanceof Integer;
+            case DOUBLE: return value instanceof Double;
+            case STRING: return value instanceof String;
+            case DATE: return value instanceof LocalDate;
+            case BOOLEAN: return value instanceof Boolean;
+            default: return false;
+        }
+    }
 
+    private void validateCondition(Table table, String whereCol, String whereOp, Object whereVal) {
+        if (!whereOp.equals("=") && !whereOp.equals("!=") && !whereOp.equals(">")
+                && !whereOp.equals("<") && !whereOp.equals(">=") && !whereOp.equals("<=")) {
+            throw new IllegalArgumentException("Неизвестный оператор: " + whereOp);
+        }
+        Column col = table.getColumn(whereCol);
+        if (col == null) {
+            throw new IllegalArgumentException(
+                    "Столбец '" + whereCol + "' в условии WHERE не найден в таблице '" + table.getTableName() + "'"
+            );
+        }
+        if (whereVal != null && !isValidType(whereVal, col.getType())) {
+            throw new IllegalArgumentException(
+                    "Неверный тип значения в условии WHERE для столбца '" + col.getName() + "'. Ожидался: " + col.getType()
+            );
+        }
+        if (col.getType() == Column.DataType.BOOLEAN
+                && !whereOp.equals("=") && !whereOp.equals("!=")) {
+            throw new IllegalArgumentException(
+                    "Для BOOLEAN поддерживаются только операторы = и !="
+            );
+        }
+    }
+
+    private boolean matchesCondition(DBrecord record, String whereCol, String whereOp, Object whereVal) {
+        Object actualValue = getValueIgnoreCase(record, whereCol);
+        // Обработка NULL
+        if (actualValue == null || whereVal == null) {
+            if ("=".equals(whereOp)) {
+                return actualValue == whereVal;
+            }
+            if ("!=".equals(whereOp)) {
+                return actualValue != whereVal;
+            }
+            return false;
+        }
+
+        switch (whereOp) {
+            case "=": return actualValue.equals(whereVal);
+            case "!=": return !actualValue.equals(whereVal);
+            case ">": return compareValues(actualValue, whereVal) > 0;
+            case "<": return compareValues(actualValue, whereVal) < 0;
+            case ">=": return compareValues(actualValue, whereVal) >= 0;
+            case "<=": return compareValues(actualValue, whereVal) <= 0;
+            default:
+                throw new IllegalArgumentException("Неизвестный оператор сравнения: " + whereOp);
+        }
+    }
+    private int compareValues(Object a, Object b) {
+        if (a instanceof Integer) return Integer.compare((Integer) a, (Integer) b);
+        if (a instanceof Double) return Double.compare((Double) a, (Double) b);
+        if (a instanceof String) return ((String) a).compareTo((String) b);
+        if (a instanceof LocalDate) return ((LocalDate) a).compareTo((LocalDate) b);
+        throw new IllegalArgumentException("Для этого типа данных сравнение не поддерживается");
+    }
 }
+
 
