@@ -7,9 +7,11 @@ import java.util.Map;
 
 public class DBparser {
     private DBmanager dbManager;
+    private TablePrinter printer;
 
     public DBparser(DBmanager dbManager) {
         this.dbManager = dbManager;
+        this.printer = new TablePrinter();
     }
 
     public void execute(String query) {
@@ -182,10 +184,7 @@ public class DBparser {
         }
 
         List<DBrecord> rows = dbManager.select(tableName, selectedColumns, whereCol, whereOp, whereVal);
-        System.out.println("Найдено записей: " + rows.size());
-        for (DBrecord row : rows) {
-            System.out.println(row);
-        }
+        printer.printTable(rows, selectedColumns);
     }
 
     private void parseUpdate(List<String> tokens) {

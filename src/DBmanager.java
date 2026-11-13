@@ -4,8 +4,9 @@ import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
 import java.util.Map;
+import java.io.*;
 
-public class DBmanager {
+public class DBmanager implements Serializable{
     private Map<String, Table> tables;
 
     public DBmanager() {
@@ -285,12 +286,49 @@ public class DBmanager {
                 throw new IllegalArgumentException("Неизвестный оператор сравнения: " + whereOp);
         }
     }
+
     private int compareValues(Object a, Object b) {
         if (a instanceof Integer) return Integer.compare((Integer) a, (Integer) b);
         if (a instanceof Double) return Double.compare((Double) a, (Double) b);
         if (a instanceof String) return ((String) a).compareTo((String) b);
         if (a instanceof LocalDate) return ((LocalDate) a).compareTo((LocalDate) b);
         throw new IllegalArgumentException("Для этого типа данных сравнение не поддерживается");
+    }
+
+    public void saveToFile(String filename) {
+        if (filename == null || filename.trim().isEmpty()) {
+            throw new IllegalArgumentException("Имя файла для сохранения не может быть пустым");
+        }
+        try (FileOutputStream fos = new FileOutputStream(filename);
+             ObjectOutputStream out = new ObjectOutputStream(fos)) {
+            out.writeObject(this);
+        }
+        catch (FileNotFoundException ex) {
+            throw new IllegalStateException("Не удалось создать или открыть файл для записи: '" + filename + "'. Проверьте путь и права доступа", ex);
+        } catch (IOException ex) {
+            throw new IllegalStateException("Ошибка ввода-вывода при сохранении базы данных в файл '" + filename + "': " + ex.getMessage(), ex);
+        }
+    }
+
+    // Загрузка БД из файла; если файла ещё нет, создаётся новая пустая БД.
+    public static DBmanager loadFromFile(String filename) {
+        if (filename == null || filename.trim().isEmpty()) {
+            throw new IllegalArgumentException("Имя файла для загрузки не может быть пустым");
+        }
+        File file = new File(filename);
+        if (!file.exists()) {
+            return new DBmanager();
+        }
+        try (FileInputStream fis = new FileInputStream(filename);
+             ObjectInputStream in = new ObjectInputStream(fis)) {
+            return (DBmanager) in.readObject();
+        }
+        catch (ClassNotFoundException ex) {
+            throw new IllegalStateException("Ошибка десериализации: не найден класс при чтении файла '" + filename + "'", ex);
+        }
+        catch (IOException ex) {
+            throw new IllegalStateException("Файл базы данных '" + filename + "' повреждён или недоступен для чтения: " + ex.getMessage(), ex);
+        }
     }
 }
 
