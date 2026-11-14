@@ -6,8 +6,8 @@ import java.util.List;
 import java.util.Map;
 
 public class DBparser {
-    private DBmanager dbManager;
-    private TablePrinter printer;
+    private final DBmanager dbManager;
+    private final TablePrinter printer;
 
     public DBparser(DBmanager dbManager) {
         this.dbManager = dbManager;
@@ -37,7 +37,10 @@ public class DBparser {
                 parseDelete(tokens);
                 break;
             case "CREATE":
-                parseCreateIndex(tokens);
+                parseCreate(tokens);
+                break;
+            case "DROP":
+                parseDrop(tokens);
                 break;
             default:
                 throw new IllegalArgumentException("Неизвестная команда: " + tokens.get(0));
@@ -274,6 +277,100 @@ public class DBparser {
         System.out.println("Удалено записей: " + deleted);
     }
 
+    private void parseCreate(List<String> tokens) {
+        String subCommand = tokenAt(tokens, 1);
+        if (subCommand.equalsIgnoreCase("INDEX")) {
+            parseCreateIndex(tokens);
+        }
+        else if (subCommand.equalsIgnoreCase("TABLE")) {
+            parseCreateTable(tokens);
+        }
+        else {
+            throw new IllegalArgumentException("После CREATE ожидалось TABLE или INDEX");
+        }
+    }
+
+    private void parseCreateTable(List<String> tokens) {
+        String tableName = tokenAt(tokens, 2);
+        if (!tokenAt(tokens, 3).equals("(")) {
+            throw new IllegalArgumentException("После имени таблицы ожидалась '('");
+        }
+        int pos = 4;
+        List<Column> columns = new ArrayList<>();
+        while (!tokenAt(tokens, pos).equals(")")) {
+            String colName = tokenAt(tokens, pos);
+            String typeStr = tokenAt(tokens, pos + 1).toUpperCase();
+            Column.DataType dataType = parseColumnType(typeStr);
+            pos += 2;
+            boolean isKey = false;
+            boolean isRequired = false;
+
+            // Проверка на флаги PRIMARY KEY и NOT NULL
+            while (pos < tokens.size() && !tokenAt(tokens, pos).equals(",")
+                    && !tokenAt(tokens, pos).equals(")")) {
+                String flag = tokenAt(tokens, pos);
+                if (flag.equalsIgnoreCase("PRIMARY") && tokenAt(tokens, pos + 1).equalsIgnoreCase("KEY")) {
+                    isKey = true;
+                    isRequired = true;
+                    pos += 2;
+                }
+                else if (flag.equalsIgnoreCase("NOT") && tokenAt(tokens, pos + 1).equalsIgnoreCase("NULL")) {
+                    isRequired = true;
+                    pos += 2;
+                }
+                else {
+                    throw new IllegalArgumentException("Неизвестный модификатор столбца: " + tokenAt(tokens, pos));
+                }
+            }
+            columns.add(new Column(colName, dataType, isKey, isRequired));
+
+            if (tokenAt(tokens, pos).equals(",")) {
+                pos++;
+            }
+            else if (!tokenAt(tokens, pos).equals(")")) {
+                throw new IllegalArgumentException("Ожидалась запятая или ')' в описании столбцов");
+            }
+        }
+        if (pos != tokens.size() - 1) {
+            throw new IllegalArgumentException("Лишние токены в конце команды CREATE TABLE");
+        }
+        dbManager.createTable(tableName, columns);
+        System.out.println("Таблица '" + tableName + "' успешно создана");
+    }
+
+    private Column.DataType parseColumnType(String typeStr) {
+        switch (typeStr) {
+            case "INT":
+            case "INTEGER":
+                return Column.DataType.INT;
+            case "DOUBLE":
+            case "FLOAT":
+                return Column.DataType.DOUBLE;
+            case "STRING":
+            case "VARCHAR":
+                return Column.DataType.STRING;
+            case "DATE":
+                return Column.DataType.DATE;
+            case "BOOL":
+            case "BOOLEAN":
+                return Column.DataType.BOOLEAN;
+            default:
+                throw new IllegalArgumentException("Неподдерживаемый тип данных: " + typeStr);
+        }
+    }
+
+    private void parseDrop(List<String> tokens) {
+        if (!tokenAt(tokens, 1).equalsIgnoreCase("TABLE")) {
+            throw new IllegalArgumentException("Ошибка в синтаксисе: после DROP ожидалось TABLE");
+        }
+        String tableName = tokenAt(tokens, 2);
+        if (tokens.size() > 3) {
+            throw new IllegalArgumentException("Лишние токены в конце команды DROP TABLE");
+        }
+        dbManager.dropTable(tableName);
+        System.out.println("Таблица '" + tableName + "' успешно удалена");
+    }
+
     private void parseCreateIndex(List<String> tokens) {
         if (!tokenAt(tokens, 1).equalsIgnoreCase("INDEX")) {
             throw new IllegalArgumentException("Ошибка в синтаксисе: после CREATE ожидалось INDEX");
@@ -329,13 +426,15 @@ public class DBparser {
         }
     }
     // Разбиение строки на части
+    // Например, запрос SELECT name, price FROM products WHERE price >= 500.0
+    // разобьется на ["SELECT", "name", ",", "price", "FROM", "products", "WHERE", "price", ">=", "500.0"]
     private List<String> breakIntoTokens(String src) {
         List<String> tokens = new ArrayList<>();
         int pos = 0;
 
         while (pos < src.length()) {
             char c = src.charAt(pos);
-            // Пропускаем пробелы и точку с запятой
+            // Пропуск пробелов и точки с запятой
             if (isSpace(c) || c == ';') {
                 pos++;
             }
@@ -374,6 +473,7 @@ public class DBparser {
         }
         return tokens;
     }
+    // Достает токен на i-ой позиции
     private String tokenAt(List<String> tokens, int i) {
         if (i < 0 || i >= tokens.size()) {
             throw new IllegalArgumentException("Неожиданный конец запроса");

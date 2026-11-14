@@ -3,10 +3,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 public class Table implements Serializable {
-
-    private String tableName;
-    private List<Column> columns;
-    private List<DBrecord> DBrecords;
+    private final String tableName;
+    private final List<Column> columns;
+    private final List<DBrecord> DBrecords;
 
     public Table(String tableName) {
         this.tableName = tableName;
@@ -25,19 +24,6 @@ public class Table implements Serializable {
             }
         }
         return null;
-    }
-    // Возвращает ключевой столбец
-    public Column getKeyColumn() {
-        for (Column column : columns) {
-            if (column.isKey()) {
-                return column;
-            }
-        }
-        return null;
-    }
-
-    public void addRecord(DBrecord record) {
-        DBrecords.add(record);
     }
 
     public String getTableName() {

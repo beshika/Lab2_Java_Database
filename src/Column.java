@@ -1,15 +1,14 @@
 import java.io.Serializable;
 
 public class Column implements Serializable {
-
     public enum DataType {
         INT, DOUBLE, STRING, DATE, BOOLEAN
     }
 
-    private String name;
-    private DataType type;
-    private boolean isKey;      // Является ли первичным ключом
-    private boolean isRequired; // Обязательно ли для заполнения или можно поставить null
+    private final String name;
+    private final DataType type;
+    private final boolean isKey;      // Является ли первичным ключом
+    private final boolean isRequired; // Обязательно ли для заполнения или можно поставить null
 
     public Column(String name, DataType type, boolean isKey, boolean isRequired) {
         this.name = name;

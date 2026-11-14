@@ -7,8 +7,8 @@ import java.util.Map;
 import java.io.*;
 
 public class DBmanager implements Serializable{
-    private Map<String, Table> tables; // Ключ - имя таблицы
-    private Map<String, DBindex> indexes; // Ключ - имя_таблицы.имя_столбца
+    private final Map<String, Table> tables; // Ключ - имя таблицы
+    private final Map<String, DBindex> indexes; // Ключ - имя_таблицы.имя_столбца
 
     public DBmanager() {
         this.tables = new HashMap<>();
@@ -33,7 +33,7 @@ public class DBmanager implements Serializable{
         tables.put("products", products);
     }
 
-     // Вставка одной записи в таблицу.
+     // Вставка записей records в таблицу tableName
     public void insert(String tableName, List<DBrecord> records) {
         Table table = getTable(tableName);
         if (records == null || records.isEmpty()) {
@@ -158,7 +158,8 @@ public class DBmanager implements Serializable{
         return result;
     }
 
-    public int update(String tableName, Map<String, Object> newValues, String whereCol, String whereOp, Object whereVal) {
+    public int update(String tableName, Map<String, Object> newValues,
+                      String whereCol, String whereOp, Object whereVal) {
         Table table = getTable(tableName);
 
         if (newValues == null || newValues.isEmpty()) {
@@ -246,7 +247,44 @@ public class DBmanager implements Serializable{
         return deletedCount;
     }
 
-     // Создаёт индекс по указанному столбцу таблицы и наполняет его текущими данными
+    // Создание новой таблицы tableName со столбцами columns
+    public void createTable(String tableName, List<Column> columns) {
+        if (tableName == null || tableName.trim().isEmpty()) {
+            throw new IllegalArgumentException("Имя таблицы не может быть пустым");
+        }
+        String key = tableName.toLowerCase();
+        if (tables.containsKey(key)) {
+            throw new IllegalStateException("Таблица '" + tableName + "' уже существует");
+        }
+        if (columns == null || columns.isEmpty()) {
+            throw new IllegalArgumentException("Таблица должна содержать хотя бы один столбец");
+        }
+
+        Table newTable = new Table(tableName);
+        for (Column col : columns) {
+            if (newTable.getColumn(col.getName()) != null) {
+                throw new IllegalArgumentException("Дублирующееся имя столбца: '" + col.getName() + "'");
+            }
+            newTable.addColumn(col);
+        }
+        tables.put(key, newTable);
+    }
+
+     // Удаление таблицы tableName и связанных с ней индексов
+    public void dropTable(String tableName) {
+        Table table = getTable(tableName); // Если таблицы нет, то выбросит исключение
+        tables.remove(table.getTableName().toLowerCase());
+
+        Iterator<Map.Entry<String, DBindex>> it = indexes.entrySet().iterator();
+        while (it.hasNext()) {
+            Map.Entry<String, DBindex> entry = it.next();
+            if (entry.getValue().getTableName().equalsIgnoreCase(table.getTableName())) {
+                it.remove();
+            }
+        }
+    }
+
+    // Создаёт индекс по указанному столбцу таблицы и наполняет его текущими данными
     public void createIndex(String indexName, String tableName, String columnName) {
         Table table = getTable(tableName);
         Column col = table.getColumn(columnName);
@@ -270,7 +308,7 @@ public class DBmanager implements Serializable{
         }
 
         // Создание и заполнение индекса
-        DBindex newIndex = new DBindex(indexName, table.getTableName(), col.getName());
+        DBindex newIndex = new DBindex(indexName, table.getTableName());
         for (DBrecord record : table.getRecords()) {
             newIndex.add(record.get(col.getName()), record);
         }

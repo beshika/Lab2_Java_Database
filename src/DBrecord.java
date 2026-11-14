@@ -3,8 +3,7 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 
 public class DBrecord implements Serializable {
-
-    private Map<String, Object> fields;
+    private final Map<String, Object> fields;
     public DBrecord() {
         this.fields = new LinkedHashMap<>();
     }
@@ -15,10 +14,6 @@ public class DBrecord implements Serializable {
 
     public Object get(String field) {
         return fields.get(field);
-    }
-
-    public boolean containsField(String field) {
-        return fields.containsKey(field);
     }
 
     public Map<String, Object> getFields() {

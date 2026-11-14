@@ -1,17 +1,15 @@
 import java.io.Serializable;
 import java.util.*;
 
-// Индекс по одному столбцу таблицы на основе красно-чёрного дерева (TreeMap)
+// Индекс по одному столбцу таблицы на основе TreeMap (красно-чёрного дерева)
 public class DBindex implements Serializable {
     private final String indexName;
     private final String tableName;
-    private final String columnName;
-    private TreeMap<Object, List<DBrecord>> tree; // Ключ - значение любого поля ДБ; Значение - список записей БД, у которых это поле равно ключу
+    private final TreeMap<Object, List<DBrecord>> tree; // Ключ - значение любого поля ДБ; Значение - список записей БД, у которых это поле равно ключу
 
-    public DBindex(String indexName, String tableName, String columnName) {
+    public DBindex(String indexName, String tableName) {
         this.indexName = indexName;
         this.tableName = tableName;
-        this.columnName = columnName;
         this.tree = new TreeMap<>();
     }
 
@@ -85,6 +83,5 @@ public class DBindex implements Serializable {
 
     public String getIndexName() { return indexName; }
     public String getTableName() { return tableName; }
-    public String getColumnName() { return columnName; }
 }
 
