@@ -7,10 +7,12 @@ import java.util.Map;
 import java.io.*;
 
 public class DBmanager implements Serializable{
-    private Map<String, Table> tables;
+    private Map<String, Table> tables; // Ключ - имя таблицы
+    private Map<String, DBindex> indexes; // Ключ - имя_таблицы.имя_столбца
 
     public DBmanager() {
         this.tables = new HashMap<>();
+        this.indexes = new HashMap<>();
         initializeTables();
     }
 
@@ -84,10 +86,19 @@ public class DBmanager implements Serializable{
             validatedRecords.add(formalizedDBrecord);
         }
         table.getRecords().addAll(validatedRecords);
+        // Обновление всех индексов с учетом добавленных записей
+        for (Column col : table.getColumns()) {
+            DBindex idx = indexes.get(makeIndexKey(table.getTableName(), col.getName()));
+            if (idx != null) {
+                for (DBrecord rec : validatedRecords) {
+                    idx.add(rec.get(col.getName()), rec);
+                }
+            }
+        }
     }
 
-     // Если columnNames == null, выбираются все столбцы (*).
-     // Если whereCol == null, выбираются все строки.
+     // Если columnNames == null, выбираются все столбцы (*)
+     // Если whereCol == null, выбираются все строки
     public List<DBrecord> select(String tableName, List<String> columnNames,
                                String whereCol, String whereOp, Object whereVal) {
         Table table = getTable(tableName);
@@ -108,19 +119,40 @@ public class DBmanager implements Serializable{
             }
         }
 
-        // Проверка условия WHERE на адекватность, если оно есть
+        // Проверка условия WHERE на адекватность (правильный тип, оператор), если оно есть
         if (whereCol != null) {
             validateCondition(table, whereCol, whereOp, whereVal);
         }
 
+        // Попытка достать значения БД по индексу
+        List<DBrecord> candidateRecords = null;
+        if (whereCol != null && whereVal != null) {
+            Column condCol = table.getColumn(whereCol);
+            DBindex idx = indexes.get(makeIndexKey(table.getTableName(), condCol.getName()));
+            if (idx != null) {
+                candidateRecords = idx.search(whereOp, whereVal); // Будут лежать все подходящие записи
+            }
+        }
+
         List<DBrecord> result = new ArrayList<>();
-        for (DBrecord original : table.getRecords()) {
-            if (whereCol == null || matchesCondition(original, whereCol, whereOp, whereVal)) {
-                DBrecord selectedRecord = new DBrecord();
+        if (candidateRecords != null) {
+            for (DBrecord rec : candidateRecords) {
+                DBrecord projected = new DBrecord();
                 for (Column col : targetColumns) {
-                    selectedRecord.set(col.getName(), original.get(col.getName()));
+                    projected.set(col.getName(), rec.get(col.getName()));
                 }
-                result.add(selectedRecord);
+                result.add(projected);
+            }
+        }
+        else {
+            for (DBrecord original : table.getRecords()) {
+                if (whereCol == null || matchesCondition(original, whereCol, whereOp, whereVal)) {
+                    DBrecord projected = new DBrecord();
+                    for (Column col : targetColumns) {
+                        projected.set(col.getName(), original.get(col.getName()));
+                    }
+                    result.add(projected);
+                }
             }
         }
         return result;
@@ -166,11 +198,21 @@ public class DBmanager implements Serializable{
         }
 
         int updatedCount = 0;
-        for (DBrecord DBrecord : table.getRecords()) {
-            if (whereCol == null || matchesCondition(DBrecord, whereCol, whereOp, whereVal)) {
+        for (DBrecord recordToUpdate : table.getRecords()) {
+            if (whereCol == null || matchesCondition(recordToUpdate, whereCol, whereOp, whereVal)) {
                 for (Map.Entry<String, Object> entry : newValues.entrySet()) {
                     Column actualCol = table.getColumn(entry.getKey());
-                    DBrecord.set(actualCol.getName(), entry.getValue());
+                    String colName = actualCol.getName();
+                    Object oldVal = recordToUpdate.get(colName);
+                    Object newVal = entry.getValue();
+
+                    // Если по этому столбцу есть индекс, то записи в нем надо обновить
+                    DBindex idx = indexes.get(makeIndexKey(table.getTableName(), colName));
+                    if (idx != null) {
+                        idx.remove(oldVal, recordToUpdate);
+                        idx.add(newVal, recordToUpdate);
+                    }
+                    recordToUpdate.set(colName, newVal);
                 }
                 updatedCount++;
             }
@@ -188,13 +230,52 @@ public class DBmanager implements Serializable{
         int deletedCount = 0;
         Iterator<DBrecord> it = table.getRecords().iterator();
         while (it.hasNext()) {
-            DBrecord DBrecord = it.next();
-            if (whereCol == null || matchesCondition(DBrecord, whereCol, whereOp, whereVal)) {
-                it.remove();
+            DBrecord recordTodelete = it.next();
+            if (whereCol == null || matchesCondition(recordTodelete, whereCol, whereOp, whereVal)) {
+                // Удаление записи из всех индексов таблицы
+                for (Column col : table.getColumns()) {
+                    DBindex idx = indexes.get(makeIndexKey(table.getTableName(), col.getName()));
+                    if (idx != null) {
+                        idx.remove(recordTodelete.get(col.getName()), recordTodelete);
+                    }
+                }
+                it.remove(); // Удаление записи из БД
                 deletedCount++;
             }
         }
         return deletedCount;
+    }
+
+     // Создаёт индекс по указанному столбцу таблицы и наполняет его текущими данными
+    public void createIndex(String indexName, String tableName, String columnName) {
+        Table table = getTable(tableName);
+        Column col = table.getColumn(columnName);
+        if (col == null) {
+            throw new IllegalArgumentException(
+                    "Столбец '" + columnName + "' не найден в таблице '" + tableName + "'"
+            );
+        }
+
+        // Проверка на то, нет ли уже индекса на этом столбце или нет ли с таким же именем во всей таблице
+        String key = makeIndexKey(table.getTableName(), col.getName());
+        if (indexes.containsKey(key)) {
+            throw new IllegalStateException(
+                    "Индекс для столбца '" + col.getName() + "' в таблице '" + table.getTableName() + "' уже существует"
+            );
+        }
+        for (DBindex existing : indexes.values()) {
+            if (existing.getIndexName().equalsIgnoreCase(indexName)) {
+                throw new IllegalStateException("Индекс с именем '" + indexName + "' уже существует");
+            }
+        }
+
+        // Создание и заполнение индекса
+        DBindex newIndex = new DBindex(indexName, table.getTableName(), col.getName());
+        for (DBrecord record : table.getRecords()) {
+            newIndex.add(record.get(col.getName()), record);
+        }
+
+        indexes.put(key, newIndex);
     }
 
     public Table getTable(String tableName) {
@@ -205,7 +286,7 @@ public class DBmanager implements Serializable{
         return table;
     }
 
-    // ___Вспомогательные методы___
+    // Вспомогательные методы
 
     private Object getValueIgnoreCase(DBrecord DBrecord, String targetField) {
         for (Map.Entry<String, Object> entry : DBrecord.getFields().entrySet()) {
@@ -295,6 +376,12 @@ public class DBmanager implements Serializable{
         throw new IllegalArgumentException("Для этого типа данных сравнение не поддерживается");
     }
 
+    private String makeIndexKey(String tableName, String colName) {
+        return tableName.toLowerCase() + "." + colName.toLowerCase();
+    }
+    
+    // Работа с файлом
+    
     public void saveToFile(String filename) {
         if (filename == null || filename.trim().isEmpty()) {
             throw new IllegalArgumentException("Имя файла для сохранения не может быть пустым");
@@ -310,13 +397,14 @@ public class DBmanager implements Serializable{
         }
     }
 
-    // Загрузка БД из файла; если файла ещё нет, создаётся новая пустая БД.
+    // Загрузка БД из файла; если файла ещё нет, создаётся новая пустая БД
     public static DBmanager loadFromFile(String filename) {
         if (filename == null || filename.trim().isEmpty()) {
             throw new IllegalArgumentException("Имя файла для загрузки не может быть пустым");
         }
         File file = new File(filename);
         if (!file.exists()) {
+            System.out.println("Файл базы данных не найден. Создана новая база данных с таблицами warehouses и products");
             return new DBmanager();
         }
         try (FileInputStream fis = new FileInputStream(filename);

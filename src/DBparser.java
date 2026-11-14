@@ -18,14 +18,11 @@ public class DBparser {
         if (query == null || query.trim().isEmpty()) {
             return;
         }
-
         List<String> tokens = breakIntoTokens(query);
         if (tokens.isEmpty()) {
             return;
         }
-
         String command = tokens.get(0).toUpperCase();
-
         switch (command) {
             case "INSERT":
                 parseInsert(tokens);
@@ -38,6 +35,9 @@ public class DBparser {
                 break;
             case "DELETE":
                 parseDelete(tokens);
+                break;
+            case "CREATE":
+                parseCreateIndex(tokens);
                 break;
             default:
                 throw new IllegalArgumentException("Неизвестная команда: " + tokens.get(0));
@@ -273,6 +273,32 @@ public class DBparser {
         int deleted = dbManager.delete(tableName, whereCol, whereOp, whereVal);
         System.out.println("Удалено записей: " + deleted);
     }
+
+    private void parseCreateIndex(List<String> tokens) {
+        if (!tokenAt(tokens, 1).equalsIgnoreCase("INDEX")) {
+            throw new IllegalArgumentException("Ошибка в синтаксисе: после CREATE ожидалось INDEX");
+        }
+        String indexName = tokenAt(tokens, 2);
+        if (!tokenAt(tokens, 3).equalsIgnoreCase("ON")) {
+            throw new IllegalArgumentException("Ошибка в синтаксисе: после имени индекса ожидалось ON");
+        }
+        String tableName = tokenAt(tokens, 4);
+        if (!tokenAt(tokens, 5).equals("(")) {
+            throw new IllegalArgumentException("Ошибка в синтаксисе: ожидалась '(' перед именем столбца");
+        }
+        String columnName = tokenAt(tokens, 6);
+        if (!tokenAt(tokens, 7).equals(")")) {
+            throw new IllegalArgumentException("Ошибка в синтаксисе: ожидалась ')' после имени столбца");
+        }
+        if (tokens.size() > 8) {
+            throw new IllegalArgumentException("Лишние токены в конце команды CREATE INDEX");
+        }
+
+        dbManager.createIndex(indexName, tableName, columnName);
+        System.out.println("Индекс '" + indexName + "' успешно создан для " + tableName + "(" + columnName + ")");
+    }
+
+    // Вспомогательные методы
 
     // Конвертация объекта к типу данных, который DBmanager может обработать
     private Object convertValue(String raw, Column.DataType type) {
