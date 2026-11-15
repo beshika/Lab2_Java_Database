@@ -1,7 +1,6 @@
 import java.io.Serializable;
 import java.util.*;
 
-// Индекс по одному столбцу таблицы на основе TreeMap (красно-чёрного дерева)
 public class DBindex implements Serializable {
     private final String indexName;
     private final String tableName;
@@ -19,7 +18,7 @@ public class DBindex implements Serializable {
             return;
         }
         List<DBrecord> list = tree.get(key);
-        if (list == null) { // Если не нашлось - надо создать новую пару ключ-значение
+        if (list == null) {
             list = new ArrayList<>();
             tree.put(key, list);
         }

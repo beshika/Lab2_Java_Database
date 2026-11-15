@@ -1,65 +1,22 @@
-import java.util.Scanner;
 import java.time.LocalDate;
 import java.util.ArrayList;
 import java.util.List;
 
-public class Main {
-    private static String DB_FILE = "testdb.dat";
+public class ConsoleTests {
+    private static String testDB = "testdbconsole.dat";
     public static void main(String[] args) {
-
-        /*System.out.println("Тестирование производительности БЕЗ индекса");
+        System.out.println("Тестирование производительности БЕЗ индекса");
         int[] sizes = {10000, 50000, 100000};
         for (int size : sizes) {
             DBmanager testDb = createTestDatabase(size);
             testSelect(testDb, size, 100);
         }
         System.out.println("Тестирование производительности С индексом по столбцу price");
-        int[] sizes = {10000, 50000, 100000};
         for (int size : sizes) {
             DBmanager testDb = createTestDatabase(size);
-            // Создаём индекс по столбцу price и замеряем скорость с ним
             testDb.createIndex("idx_products_price", "products", "price");
             testSelect(testDb, size, 100);
-        }*/
-
-        DBmanager db;
-        try {
-            // Загрузка БД
-            db = DBmanager.loadFromFile(DB_FILE);
-        } catch (IllegalStateException e) {
-            System.out.println("Ошибка загрузки " + e.getMessage());
-            db = new DBmanager();
         }
-
-        DBparser parser = new DBparser(db);
-        Scanner scanner = new Scanner(System.in);
-
-        while (true) {
-            System.out.print("\nTestDB> ");
-            String input = scanner.nextLine().trim();
-
-            if (input.equalsIgnoreCase("exit")) {
-                // Сохранение при выходе
-                db.saveToFile(DB_FILE);
-                System.out.println("Данные сохранены. Выход.");
-                break;
-            }
-            if (input.isEmpty()) {
-                continue;
-            }
-
-            try {
-                parser.execute(input);
-                db.saveToFile(DB_FILE);
-            }
-            catch (IllegalArgumentException | IllegalStateException e) {
-                System.out.println("Ошибка: " + e.getMessage());
-            }
-            catch (Exception e) {
-                System.out.println("Неожиданная ошибка: " + e.getMessage());
-            }
-        }
-        scanner.close();
     }
 
     // Создает новую БД в памяти и заполняет таблицу products заданным числом записей
@@ -71,6 +28,12 @@ public class Main {
         double currentPrice = 100.0;
         int groupLimit = 100;   // Сколько товаров с текущей ценой (сначала 100)
         int countInGroup = 0;   // Счетчик товаров в текущей ценовой группе
+
+        DBrecord warehouse = new DBrecord();
+        warehouse.set("id", 1);
+        warehouse.set("address", "Тестовый склад");
+        warehouse.set("isFull", false);
+        testDb.insert("warehouses", List.of(warehouse));
 
         for (int i = 1; i <= rowCount; i++) {
             DBrecord product = new DBrecord();
@@ -126,7 +89,7 @@ public class Main {
         System.out.println("   ");
         System.out.println("Запрос: SELECT * FROM PRODUCTS WHERE price = " + targetPrice);
         System.out.println("Количество записей в таблице: " + rowCount);
-        System.out.println("Количество прогонов запроса SELECT: " + iterations);
+        System.out.println("Количество прогонов запроса SELECT в одном замере: " + iterations);
         System.out.println("Замеры по сериям (мс): " + java.util.Arrays.toString(resultsMs));
         System.out.println("Итоговое среднее время (мс): " + totalAverageMs);
     }

@@ -7,41 +7,38 @@ import java.util.Map;
 
 public class DBparser {
     private final DBmanager dbManager;
-    private final TablePrinter printer;
 
     public DBparser(DBmanager dbManager) {
         this.dbManager = dbManager;
-        this.printer = new TablePrinter();
     }
 
-    public void execute(String query) {
+    public List<DBrecord> execute(String query) {
         if (query == null || query.trim().isEmpty()) {
-            return;
+            return null;
         }
         List<String> tokens = breakIntoTokens(query);
         if (tokens.isEmpty()) {
-            return;
+            return null;
         }
         String command = tokens.get(0).toUpperCase();
         switch (command) {
             case "INSERT":
                 parseInsert(tokens);
-                break;
+                return null;
             case "SELECT":
-                parseSelect(tokens);
-                break;
+                return parseSelect(tokens);
             case "UPDATE":
                 parseUpdate(tokens);
-                break;
+                return null;
             case "DELETE":
                 parseDelete(tokens);
-                break;
+                return null;
             case "CREATE":
                 parseCreate(tokens);
-                break;
+                return null;
             case "DROP":
                 parseDrop(tokens);
-                break;
+                return null;
             default:
                 throw new IllegalArgumentException("Неизвестная команда: " + tokens.get(0));
         }
@@ -51,10 +48,8 @@ public class DBparser {
         if (!tokenAt(tokens, 1).equalsIgnoreCase("INTO")) {
             throw new IllegalArgumentException("Ошибка в синтаксисе: после INSERT ожидалось INTO");
         }
-
         String tableName = tokenAt(tokens, 2);
         Table table = dbManager.getTable(tableName);
-
         int pos = 3;
         List<Column> targetColumns = new ArrayList<>();
         // Проверка на то, указаны ли конкретные столбцы в скобках (как в примере INSERT INTO cars (id, brand) VALUES)
@@ -64,20 +59,20 @@ public class DBparser {
                 String colName = tokenAt(tokens, pos);
                 Column col = table.getColumn(colName);
                 if (col == null) {
-                    throw new IllegalArgumentException(
-                            "Столбец '" + colName + "' не найден в таблице '" + tableName + "'"
-                    );
+                    throw new IllegalArgumentException("Столбец '" + colName + "' не найден в таблице '" + tableName + "'");
                 }
                 targetColumns.add(col);
                 pos++;
                 if (tokenAt(tokens, pos).equals(",")) {
                     pos++;
-                } else if (!tokenAt(tokens, pos).equals(")")) {
+                }
+                else if (!tokenAt(tokens, pos).equals(")")) {
                     throw new IllegalArgumentException("Ожидалась запятая или ')' в списке столбцов");
                 }
             }
-            pos++; // пропуск ')'
-        } else {
+            pos++;
+        }
+        else {
             // Если столбцы не указаны, берем все столбцы таблицы по порядку
             targetColumns.addAll(table.getColumns());
         }
@@ -99,19 +94,17 @@ public class DBparser {
                 pos++;
                 if (tokenAt(tokens, pos).equals(",")) {
                     pos++;
-                } else if (!tokenAt(tokens, pos).equals(")")) {
+                }
+                else if (!tokenAt(tokens, pos).equals(")")) {
                     throw new IllegalArgumentException("Ожидалась запятая или ')' в списке значений");
                 }
             }
             pos++;
 
             if (rawValues.size() != targetColumns.size()) {
-                throw new IllegalArgumentException(
-                        "Количество столбцов (" + targetColumns.size() + ") не совпадает с количеством значений (" + rawValues.size() + ")"
-                );
+                throw new IllegalArgumentException("Количество столбцов (" + targetColumns.size() + ") не совпадает с количеством значений (" + rawValues.size() + ")");
             }
-
-            // Формируем DBrecord, сопоставляя значения с выбранными столбцами
+            // Формирование DBrecord происходит при сопоставлении значения с выбранными столбцами
             DBrecord record = new DBrecord();
             for (int i = 0; i < targetColumns.size(); i++) {
                 Column col = targetColumns.get(i);
@@ -119,23 +112,21 @@ public class DBparser {
                 record.set(col.getName(), typedValue);
             }
             recordsToInsert.add(record);
-
             if (pos < tokens.size() && tokenAt(tokens, pos).equals(",")) {
                 pos++;
-            } else {
+            }
+            else {
                 break;
             }
         }
-
         if (pos != tokens.size()) {
             throw new IllegalArgumentException("Лишние токены в конце запроса INSERT");
         }
-
         dbManager.insert(tableName, recordsToInsert);
-        System.out.println("Успешно добавлено записей: " + recordsToInsert.size());
+        System.out.println("В таблицу " + tableName + " успешно добавлено записей: " + recordsToInsert.size());
     }
 
-    private void parseSelect(List<String> tokens) {
+    private List<DBrecord> parseSelect(List<String> tokens) {
         int pos = 1;
         List<String> selectedColumns = null; // Если список null, значит передали Select *
         if (tokenAt(tokens, pos).equals("*")) {
@@ -149,7 +140,8 @@ public class DBparser {
                 pos++;
                 if (tokenAt(tokens, pos).equals(",")) {
                     pos++;
-                } else {
+                }
+                else {
                     break;
                 }
             }
@@ -162,7 +154,6 @@ public class DBparser {
         String tableName = tokenAt(tokens, pos);
         Table table = dbManager.getTable(tableName);
         pos++;
-
         String whereCol = null;
         String whereOp = null;
         Object whereVal = null;
@@ -174,11 +165,9 @@ public class DBparser {
             whereCol = tokenAt(tokens, pos + 1);
             whereOp = tokenAt(tokens, pos + 2);
             String rawWhereVal = tokenAt(tokens, pos + 3);
-
             if (pos + 4 != tokens.size()) {
                 throw new IllegalArgumentException("Лишние токены после условия WHERE");
             }
-
             Column condCol = table.getColumn(whereCol);
             if (condCol == null) {
                 throw new IllegalArgumentException("Столбец '" + whereCol + "' не найден в таблице '" + tableName + "'");
@@ -187,7 +176,7 @@ public class DBparser {
         }
 
         List<DBrecord> rows = dbManager.select(tableName, selectedColumns, whereCol, whereOp, whereVal);
-        printer.printTable(rows, selectedColumns);
+        return rows;
     }
 
     private void parseUpdate(List<String> tokens) {
@@ -217,7 +206,8 @@ public class DBparser {
 
             if (pos < tokens.size() && tokenAt(tokens, pos).equals(",")) {
                 pos++;
-            } else {
+            }
+            else {
                 break;
             }
         }
@@ -236,16 +226,14 @@ public class DBparser {
             if (pos + 4 != tokens.size()) {
                 throw new IllegalArgumentException("Лишние токены после условия WHERE");
             }
-
             Column condCol = table.getColumn(whereCol);
             if (condCol == null) {
                 throw new IllegalArgumentException("Столбец '" + whereCol + "' не найден в таблице '" + tableName + "'");
             }
             whereVal = convertValue(givenWhereVal, condCol.getType());
         }
-
         int updated = dbManager.update(tableName, newValues, whereCol, whereOp, whereVal);
-        System.out.println("Обновлено записей: " + updated);
+        System.out.println("Обновлено записей в таблице " + tableName + ": " + updated);
     }
 
     private void parseDelete(List<String> tokens) {
@@ -274,7 +262,7 @@ public class DBparser {
             whereVal = convertValue(rawWhereVal, condCol.getType());
         }
         int deleted = dbManager.delete(tableName, whereCol, whereOp, whereVal);
-        System.out.println("Удалено записей: " + deleted);
+        System.out.println("Удалено записей в таблице " + tableName+": " + deleted);
     }
 
     private void parseCreate(List<String> tokens) {
@@ -390,7 +378,6 @@ public class DBparser {
         if (tokens.size() > 8) {
             throw new IllegalArgumentException("Лишние токены в конце команды CREATE INDEX");
         }
-
         dbManager.createIndex(indexName, tableName, columnName);
         System.out.println("Индекс '" + indexName + "' успешно создан для " + tableName + "(" + columnName + ")");
     }
@@ -419,19 +406,18 @@ public class DBparser {
                 default:
                     throw new IllegalArgumentException("Неизвестный тип данных");
             }
-        } catch (NumberFormatException | DateTimeParseException e) {
-            throw new IllegalArgumentException(
-                    "Не удалось преобразовать значение '" + raw + "' к типу " + type
-            );
+        }
+        catch (NumberFormatException | DateTimeParseException e) {
+            throw new IllegalArgumentException("Не удалось преобразовать значение '" + raw + "' к типу " + type);
         }
     }
+
     // Разбиение строки на части
     // Например, запрос SELECT name, price FROM products WHERE price >= 500.0
     // разобьется на ["SELECT", "name", ",", "price", "FROM", "products", "WHERE", "price", ">=", "500.0"]
     private List<String> breakIntoTokens(String src) {
         List<String> tokens = new ArrayList<>();
         int pos = 0;
-
         while (pos < src.length()) {
             char c = src.charAt(pos);
             // Пропуск пробелов и точки с запятой
@@ -473,6 +459,7 @@ public class DBparser {
         }
         return tokens;
     }
+
     // Достает токен на i-ой позиции
     private String tokenAt(List<String> tokens, int i) {
         if (i < 0 || i >= tokens.size()) {

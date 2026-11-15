@@ -33,7 +33,6 @@ public class DBmanager implements Serializable{
         tables.put("products", products);
     }
 
-     // Вставка записей records в таблицу tableName
     public void insert(String tableName, List<DBrecord> records) {
         Table table = getTable(tableName);
         if (records == null || records.isEmpty()) {
@@ -45,9 +44,7 @@ public class DBmanager implements Serializable{
         for (DBrecord record : records) {
             for (String fieldName : record.getFields().keySet()) {
                 if (table.getColumn(fieldName) == null) {
-                    throw new IllegalArgumentException(
-                            "Столбец '" + fieldName + "' не существует в таблице '" + tableName + "'"
-                    );
+                    throw new IllegalArgumentException("Столбец '" + fieldName + "' не существует в таблице '" + tableName + "'");
                 }
             }
 
@@ -81,6 +78,9 @@ public class DBmanager implements Serializable{
                         }
                     }
                 }
+                if (table.getTableName().equalsIgnoreCase("products") && colName.equalsIgnoreCase("warehouseId")) {
+                    checkWarehouseExists(value);
+                }
                 formalizedDBrecord.set(colName, value);
             }
             validatedRecords.add(formalizedDBrecord);
@@ -111,9 +111,7 @@ public class DBmanager implements Serializable{
             for (String colName : columnNames) {
                 Column col = table.getColumn(colName);
                 if (col == null) {
-                    throw new IllegalArgumentException(
-                            "Столбец '" + colName + "' не найден в таблице '" + tableName + "'"
-                    );
+                    throw new IllegalArgumentException("Столбец '" + colName + "' не найден в таблице '" + tableName + "'");
                 }
                 targetColumns.add(col);
             }
@@ -172,32 +170,27 @@ public class DBmanager implements Serializable{
 
             Column col = table.getColumn(colName);
             if (col == null) {
-                throw new IllegalArgumentException(
-                        "Столбец '" + colName + "' не существует в таблице '" + tableName + "'"
-                );
+                throw new IllegalArgumentException("Столбец '" + colName + "' не существует в таблице '" + tableName + "'");
             }
-
             if (col.isKey()) {
                 throw new IllegalArgumentException("Нельзя изменять первичный ключ '" + colName + "'");
             }
-
             if (newVal == null) {
                 if (col.isRequired()) {
-                    throw new IllegalArgumentException(
-                            "Обязательное поле '" + colName + "' нельзя установить в null"
-                    );
+                    throw new IllegalArgumentException("Обязательное поле '" + colName + "' нельзя установить в null");
                 }
-            } else if (!isValidType(newVal, col.getType())) {
-                throw new IllegalArgumentException(
-                        "Неверный тип данных для столбца '" + colName + "'. Ожидался: " + col.getType()
-                );
+            }
+            else if (!isValidType(newVal, col.getType())) {
+                throw new IllegalArgumentException("Неверный тип данных для столбца '" + colName + "'. Ожидался: " + col.getType());
+            }
+            if (table.getTableName().equalsIgnoreCase("products") && col.getName().equalsIgnoreCase("warehouseId") && newVal != null) {
+                checkWarehouseExists(newVal);
             }
         }
         // Проверка условия WHERE при наличии
         if (whereCol != null) {
             validateCondition(table, whereCol, whereOp, whereVal);
         }
-
         int updatedCount = 0;
         for (DBrecord recordToUpdate : table.getRecords()) {
             if (whereCol == null || matchesCondition(recordToUpdate, whereCol, whereOp, whereVal)) {
@@ -207,7 +200,7 @@ public class DBmanager implements Serializable{
                     Object oldVal = recordToUpdate.get(colName);
                     Object newVal = entry.getValue();
 
-                    // Если по этому столбцу есть индекс, то записи в нем надо обновить
+                    // Обновление записи по индексу, если он есть по столбцу
                     DBindex idx = indexes.get(makeIndexKey(table.getTableName(), colName));
                     if (idx != null) {
                         idx.remove(oldVal, recordToUpdate);
@@ -223,15 +216,25 @@ public class DBmanager implements Serializable{
 
     public int delete(String tableName, String whereCol, String whereOp, Object whereVal) {
         Table table = getTable(tableName);
-
         if (whereCol != null) {
             validateCondition(table, whereCol, whereOp, whereVal);
         }
-
         int deletedCount = 0;
         Iterator<DBrecord> it = table.getRecords().iterator();
         while (it.hasNext()) {
             DBrecord recordTodelete = it.next();
+            if (table.getTableName().equalsIgnoreCase("warehouses")) {
+                Object warehouseIdToDelete = recordTodelete.get("id");
+                Table products = tables.get("products");
+                if (products != null) {
+                    for (DBrecord prod : products.getRecords()) {
+                        Object prodWarehouseId = prod.get("warehouseId");
+                        if (prodWarehouseId != null && prodWarehouseId.equals(warehouseIdToDelete)) {
+                            throw new IllegalStateException("Нельзя удалить склад id = " + warehouseIdToDelete + ", так как к нему привязаны товары в таблице 'products'");
+                        }
+                    }
+                }
+            }
             if (whereCol == null || matchesCondition(recordTodelete, whereCol, whereOp, whereVal)) {
                 // Удаление записи из всех индексов таблицы
                 for (Column col : table.getColumns()) {
@@ -273,6 +276,10 @@ public class DBmanager implements Serializable{
      // Удаление таблицы tableName и связанных с ней индексов
     public void dropTable(String tableName) {
         Table table = getTable(tableName); // Если таблицы нет, то выбросит исключение
+        if (table.getTableName().equalsIgnoreCase("warehouses") && tables.containsKey("products")) {
+            throw new IllegalStateException("Нельзя удалить таблицу 'warehouses', пока на неё ссылается таблица 'products'");
+        }
+
         tables.remove(table.getTableName().toLowerCase());
 
         Iterator<Map.Entry<String, DBindex>> it = indexes.entrySet().iterator();
@@ -284,14 +291,12 @@ public class DBmanager implements Serializable{
         }
     }
 
-    // Создаёт индекс по указанному столбцу таблицы и наполняет его текущими данными
+    // Создаёт индекс по указанному столбцу таблицы и наполняет его данными из БД
     public void createIndex(String indexName, String tableName, String columnName) {
         Table table = getTable(tableName);
         Column col = table.getColumn(columnName);
         if (col == null) {
-            throw new IllegalArgumentException(
-                    "Столбец '" + columnName + "' не найден в таблице '" + tableName + "'"
-            );
+            throw new IllegalArgumentException("Столбец '" + columnName + "' не найден в таблице '" + tableName + "'");
         }
 
         // Проверка на то, нет ли уже индекса на этом столбце или нет ли с таким же именем во всей таблице
@@ -307,7 +312,6 @@ public class DBmanager implements Serializable{
             }
         }
 
-        // Создание и заполнение индекса
         DBindex newIndex = new DBindex(indexName, table.getTableName());
         for (DBrecord record : table.getRecords()) {
             newIndex.add(record.get(col.getName()), record);
@@ -339,11 +343,26 @@ public class DBmanager implements Serializable{
         for (DBrecord existing : table.getRecords()) {
             Object existingKey = existing.get(keyColName);
             if (existingKey != null && existingKey.equals(newKeyValue)) {
-                throw new IllegalArgumentException(
-                        "Нарушение уникальности первичного ключа! Запись с " + keyColName + " = " + newKeyValue + " уже существует."
-                );
+                throw new IllegalArgumentException("Нарушение уникальности первичного ключа! Запись с " + keyColName + " = " + newKeyValue + " уже существует.");
             }
         }
+    }
+
+    private void checkWarehouseExists(Object warehouseId) {
+        if (warehouseId == null) {
+            return;
+        }
+        Table warehouses = tables.get("warehouses");
+        if (warehouses == null) {
+            throw new IllegalStateException("Связанная таблица 'warehouses' не найдена");
+        }
+        for (DBrecord w : warehouses.getRecords()) {
+            Object existingId = getValueIgnoreCase(w, "id");
+            if (existingId != null && existingId.equals(warehouseId)) {
+                return;
+            }
+        }
+        throw new IllegalArgumentException("Нарушение ссылки по внешнему ключу: склад с id = " + warehouseId + " не существует в таблице 'warehouses'");
     }
 
     private boolean isValidType(Object value, Column.DataType expectedType) {
@@ -364,20 +383,14 @@ public class DBmanager implements Serializable{
         }
         Column col = table.getColumn(whereCol);
         if (col == null) {
-            throw new IllegalArgumentException(
-                    "Столбец '" + whereCol + "' в условии WHERE не найден в таблице '" + table.getTableName() + "'"
-            );
+            throw new IllegalArgumentException("Столбец '" + whereCol + "' в условии WHERE не найден в таблице '" + table.getTableName() + "'");
         }
         if (whereVal != null && !isValidType(whereVal, col.getType())) {
-            throw new IllegalArgumentException(
-                    "Неверный тип значения в условии WHERE для столбца '" + col.getName() + "'. Ожидался: " + col.getType()
-            );
+            throw new IllegalArgumentException("Неверный тип значения в условии WHERE для столбца '" + col.getName() + "'. Ожидался: " + col.getType());
         }
         if (col.getType() == Column.DataType.BOOLEAN
                 && !whereOp.equals("=") && !whereOp.equals("!=")) {
-            throw new IllegalArgumentException(
-                    "Для BOOLEAN поддерживаются только операторы = и !="
-            );
+            throw new IllegalArgumentException("Для BOOLEAN поддерживаются только операторы = и !=");
         }
     }
 
